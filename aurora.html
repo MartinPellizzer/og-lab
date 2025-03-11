@@ -35,10 +35,96 @@
                 <li>Replace ozone generators with adjustable ones (variable output selected from software)</li>
                 <li>Include web server (read-only data)</li>
             </ul>
-            <h2>DOING NOW</h2>
-            <li>Include modbus (internal components communication)</li>
-            <h3>MODBUS</h3>
+
+            <!-- DOING NOW -->
+
+            <h2>DOING NOW (MODBUS)</h2>
+
+            <p>- Complete slave code with the code below.</p>
+
+            <p style="font-weight: bold;">DEF: NETWORK SERIAL</p>
+            <p>Global code, place it at the top of main.</p>
+            <pre><code>
+HardwareSerial serial_modbus(1);
+            </code></pre>
+
+            <p style="font-weight: bold;">ITIT: NETWORK SERIAL</p>
+            <p>Setup code, place it in the SETUP() function.</p>
+            <pre><code>
+serial_modbus.begin(9600, SERIAL_8N1, 17, 4);
+            </code></pre>
+
+            <p style="font-weight: bold;">DEF/INIT:: NETWORK SETTINGS</p>
+            <p>Use the following settings for all devices in the modbus network.</p>
+            <p>NOTE: Code not yet implemented.</p>
+            <pre><code>
+uint32_t baud_rate = 9600;
+uint8_t n_data_bits = 8;
+uint8_t n_stop_bits = 1;
+uint8_t parity = 0;
+            </code></pre>
+
+            <p style="font-weight: bold;">DEF/INIT: MODBUS STRUCT</p>
+            <p>This struct store the modbus data. Include it at the top of the main program file. The functions below
+                need this struct to work.</p>
+            <pre><code>
+typedef struct modbus_t {
+    uint8_t sender_buff[8] = {0};
+    uint8_t sender_buff_index = 0;
+    uint32_t sender_timer = 0;
+    
+    uint8_t receiver_buff[8] = {0};
+    uint8_t receiver_buff_index = 0;
+    uint32_t receiver_timer = 0;
+    
+    uint8_t bytestream_receiving = 0;
+    uint8_t bytestream_received = 0;
+} modbus_t;
+modbus_t modbus = {};
+            </code></pre>
+
+
+            <p style="font-weight: bold;">FUN: Write ByteStream (Send Query/Response)</p>
+            <p>Write bytestream of chosen buffer to modbus.</p>
+            <pre><code>
+void modbus_write(uint8_t *buf, int len) 
+{
+  for(int pos = 0; pos < len; pos++)
+  {
+    serial_modbus.write(buf[pos]);
+  }
+}
+            </code></pre>
+
+            <p style="font-weight: bold;">FUN: Read ByteStream (Receive Query/Response)</p>
+            <p>Read incoming bytestream, save complete stream in <code
+                    style="font-weight: bold; color: #c026d3;">modbus.receiver_buff</code> and notify complete
+                bytestream with <code style="font-weight: bold; color: #c026d3;">modbus.bytestream_received</code>.</p>
+            <pre><code>
+void modbus_read() 
+{
+    if (serial_modbus.available() > 0) 
+    {
+        uint8_t c = serial_modbus.read();
+        modbus.receiver_buff[modbus.receiver_buff_index] = c;
+        modbus.receiver_buff_index++;
+        modbus.bytestream_receiving = 1;
+        modbus.receiver_timer = millis();
+    }
+
+    if (modbus.bytestream_receiving) 
+    {
+        if (millis() - modbus.receiver_timer > 40) 
+        {
+            modbus.receiver_buff_index = 0;
+            modbus.bytestream_receiving = 0;
+            modbus.bytestream_received = 1;
+        }
+    }
+}
+            </code></pre>
             <p style="font-weight: bold;">FUN: Calculate CRC16</p>
+            <p>Calculate and return the Modbus CRC16 value.</p>
             <pre><code>
 uint16_t modbus_crc16(uint8_t *buf, int len)
 {

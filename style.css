@@ -24,10 +24,19 @@
 
 article h2 {
     margin-top: 48px;
+    margin-bottom: 16px;
 }
 
 article h3 {
     margin-top: 16px;
+    margin-bottom: 16px;
+}
+
+article p {
+    margin-bottom: 16px;
+}
+
+article ul {
     margin-bottom: 16px;
 }
 
@@ -36,4 +45,5 @@ article pre {
     background-color: #303030;
     padding-left: 16px;
     padding-right: 16px;
+    margin-bottom: 16px;
 }
