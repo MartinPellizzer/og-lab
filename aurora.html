@@ -40,7 +40,69 @@
 
             <h2>DOING NOW (MODBUS)</h2>
 
-            <p>- Complete slave code with the code below.</p>
+            <h3>INTRO</h3>
+
+            <p>The modbus query is formatted as a bytestream of 8 bytes.</p>
+
+            <h3>USAGE</h3>
+
+            <p>Master can send the following queries (bytestreams).</p>
+
+            <p><b>Read Ozone Sensor (ppb)</b></p>
+            <pre><code>
+[0x16][0x04][0x00][0x12][0x00][0x01][0x00][0x00]
+            </code></pre>
+            <p>NOTE: Update the command above with correct crc. Use function <code
+                    style="font-weight: bold; color: #c026d3;">modbus_crc16</code> for
+                automatic crc calculation and update.</p>
+
+            <h3>IMPLEMENTATION</h3>
+            <p><b>QUERY FORMAT</b></p>
+            <pre><code>
+[id][cmd][st_reg_hb][st_reg_lb][fl_reg_hb][fl_reg_lb][crc_hb][crc_lb]
+            </code></pre>
+            <p><b>QUERY LEGEND</b></p>
+            <ul>
+                <li><b>id</b>: ID device</li>
+                <li><b>cmd</b>: Command to send</li>
+                <li><b>st_reg_hb</b>: Start register address (high-byte)</li>
+                <li><b>st_reg_lb</b>: Start register address (low-byte)</li>
+                <li><b>fl_reg_hb</b>: Number of following registers to read (high-byte)</li>
+                <li><b>fl_reg_lb</b>: Number of following registers to read (low-byte)</li>
+                <li><b>crc_hb</b>: CRC16 code (high-byte)</li>
+                <li><b>crc_lb</b>: CRC16 code (low-byte)</li>
+            </ul>
+
+            <p><b>QUERIES TO SEND</b></p>
+            <p>Define and init queries with the following line of code (where you replace "buf" with a good variable
+                name for the query).</p>
+            <pre><code>
+uint8_t query_pressure_analog_in[8] = {0x16, 0x04, 0x00, 0x12, 0x00, 0x01, 0x00, 0x00};
+            </code></pre>
+            <p>WARNING: The last 2 bytes are the CRC16, so they must be calculated and updated in the buffer before
+                sending it as query. To calculate the CRC16, use the function provided somewhere below in this page.</p>
+
+            <p>Read Ozone Sensor</p>
+            <pre><code>
+[0x16][0x04][0x00][0x01][0x00][0x01][0x00][0x00]
+            </code></pre>
+
+            <p>Read Oxygen Sensor</p>
+            <pre><code>
+[0x16][0x04][0x00][0x02][0x00][0x01][0x00][0x00]
+            </code></pre>
+
+            <!-- // buffer send format (8 bytes total)
+            // buffer[0] = device id
+            // buffer[1] = comand - 1: read coil status (digital out)
+            // - 2: read input status (digital in)
+            // - 3: read holding registers (analog out)
+            // - 4: read input registers (analog in)
+            // - ?: force single coil
+            // - ?: preset single register
+            // buffer[2:3] = start register address (2 bytes)
+            // buffer[4:5] = number of consecutive data bytes (2 bytes)
+            // buffer[6:7] = CRC (2 bytes) -->
 
             <p style="font-weight: bold;">DEF: NETWORK SERIAL</p>
             <p>Global code, place it at the top of main.</p>
@@ -48,7 +110,7 @@
 HardwareSerial serial_modbus(1);
             </code></pre>
 
-            <p style="font-weight: bold;">ITIT: NETWORK SERIAL</p>
+            <p style="font-weight: bold;">INIT: NETWORK SERIAL</p>
             <p>Setup code, place it in the SETUP() function.</p>
             <pre><code>
 serial_modbus.begin(9600, SERIAL_8N1, 17, 4);
@@ -82,7 +144,6 @@ typedef struct modbus_t {
 } modbus_t;
 modbus_t modbus = {};
             </code></pre>
-
 
             <p style="font-weight: bold;">FUN: Write ByteStream (Send Query/Response)</p>
             <p>Write bytestream of chosen buffer to modbus.</p>
@@ -123,6 +184,7 @@ void modbus_read()
     }
 }
             </code></pre>
+
             <p style="font-weight: bold;">FUN: Calculate CRC16</p>
             <p>Calculate and return the Modbus CRC16 value.</p>
             <pre><code>
@@ -146,6 +208,23 @@ uint16_t modbus_crc16(uint8_t *buf, int len)
         }
     }
     return crc;  
+}
+            </code></pre>
+
+
+            <p style="font-weight: bold;">FUN: Print ByteStream (Debug)</p>
+            <p>Print the bytestream buffer in the main serial interface. This function is used for debug purpose only,
+                to check if the bytestreams are sent/received correctly.</p>
+            <pre><code>
+void modbus_print(uint8_t *buf, int len) 
+{
+  for(int i = 0; i < len; i++)
+  {
+    Serial.print("0x");
+    Serial.print(buf[i], HEX);
+    Serial.print(" ");
+  }
+  Serial.println();
 }
             </code></pre>
         </article>
