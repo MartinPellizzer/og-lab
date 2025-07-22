@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="/style.css">
+    <title>Aurora Modbus</title>
+</head>
+
+<body>
+    <main class="container-sm">
+        <article>
+            <h1>Aurora Modbus</h1>
+            <a href="/assets/modbus.ino">Download Resources</a>
+
+            <p>Aurora uses Modbus RTU to communicate with some internal devices, such as ozone sensors and oxygen
+                sensors.</p>
+            <p>The Modbus is being used because a lot of these devices communicate via a serial interface, as
+                the suppliers of these devices designed them like that. So, as the ESP32 used in Aurora has only a very
+                limited number of
+                serial ports, Modbus is being used to enable Aurora to communicate with more serial devices
+                simultaneously.</p>
+            <p>Aurora uses a RS485 interface for the Modbus communication.</p>
+
+            <hr style="margin-bottom: 16px;">
+            <h2>USAGE</h2>
+            <p>The Modbus Query (Master) is formatted as a bytestream of 8 bytes.</p>
+            <p>The Modbus Response (Slave) is formatted as a bytestream of 7 bytes.</p>
+
+            <p><b>Ozone Sensor Val (ppb)</b></p>
+            <pre><code>
+[0x16][0x04][0x00][0x12][0x00][0x01][0x00][0x00]
+            </code></pre>
+            <p>NOTE: Update the command above with correct crc. Use function <code
+                    style="font-weight: bold; color: #c026d3;">modbus_crc16</code> for
+                automatic crc calculation and update.</p>
+
+            <hr style="margin-bottom: 16px;">
+            <h2>IMPLEMENTATION</h2>
+            <p><b>QUERY FORMAT</b></p>
+            <pre><code>
+[id][cmd][st_reg_hb][st_reg_lb][fl_reg_hb][fl_reg_lb][crc_hb][crc_lb]
+            </code></pre>
+            <p><b>QUERY LEGEND</b></p>
+            <ul>
+                <li><b>id</b>: ID device</li>
+                <li><b>cmd</b>: Command to send</li>
+                <li><b>st_reg_hb</b>: Start register address (high-byte)</li>
+                <li><b>st_reg_lb</b>: Start register address (low-byte)</li>
+                <li><b>fl_reg_hb</b>: Number of following registers to read (high-byte)</li>
+                <li><b>fl_reg_lb</b>: Number of following registers to read (low-byte)</li>
+                <li><b>crc_hb</b>: CRC16 code (high-byte)</li>
+                <li><b>crc_lb</b>: CRC16 code (low-byte)</li>
+            </ul>
+
+            <!-- // buffer send format (8 bytes total)
+            // buffer[0] = device id
+            // buffer[1] = comand - 1: read coil status (digital out)
+            // - 2: read input status (digital in)
+            // - 3: read holding registers (analog out)
+            // - 4: read input registers (analog in)
+            // - ?: force single coil
+            // - ?: preset single register
+            // buffer[2:3] = start register address (2 bytes)
+            // buffer[4:5] = number of consecutive data bytes (2 bytes)
+            // buffer[6:7] = CRC (2 bytes) -->
+
+            <p style="font-weight: bold;">DEF: NETWORK SERIAL</p>
+            <p>Global code, place it at the top of main.</p>
+            <pre><code>
+// ESP32
+HardwareSerial serial_modbus(1);
+
+// Arduino
+SoftwareSerial serial_modbus(2, 3);
+            </code></pre>
+
+            <p style="font-weight: bold;">INIT: NETWORK SERIAL</p>
+            <p>Setup code, place it in the <code style="font-weight: bold; color: #c026d3;">setup()</code>
+                function.</p>
+            <pre><code>
+// ESP32
+serial_modbus.begin(9600, SERIAL_8N1, 17, 4);
+
+// Arduino
+serial_modbus.begin(9600);
+            </code></pre>
+
+
+            <p style="font-weight: bold;">DEF/INIT: NETWORK SETTINGS</p>
+            <p>Use the following settings for all devices in the modbus network.</p>
+            <p>NOTE: Code not yet implemented.</p>
+            <pre><code>
+uint32_t baud_rate = 9600;
+uint8_t n_data_bits = 8;
+uint8_t n_stop_bits = 1;
+uint8_t parity = 0;
+            </code></pre>
+
+            <p style="font-weight: bold;">DEF/INIT: MODBUS BUFFERS LENGTHS</p>
+            <p>Decide the lengths of the sending/receiving buffers depending on the type of device (master/slave).</p>
+            <pre><code>
+// Master                
+const uint8_t MASTER_SENDER_BUFF_SIZE = 8; 
+const uint8_t MASTER_RECEIVER_BUFF_SIZE = 7; 
+
+// Slave
+const uint8_t SLAVE_SENDER_BUFF_SIZE = 7;
+const uint8_t SLAVE_RECEIVER_BUFF_SIZE = 8;
+            </code></pre>
+
+            <p style="font-weight: bold;">DEF/INIT: MODBUS STRUCT</p>
+            <p>This struct store the modbus data. Include it at the top of the main program file. The functions below
+                need this struct to work.</p>
+            <pre><code>
+typedef struct modbus_t {
+    uint8_t sender_buff[MASTER_SENDER_BUFF_SIZE] = {0};
+    uint8_t sender_buff_index = 0;
+    uint32_t sender_timer = 0;
+    uint8_t receiver_buff[MASTER_RECEIVER_BUFF_SIZE] = {0};
+    uint8_t receiver_buff_index = 0;
+    uint32_t receiver_timer = 0;
+    uint8_t bytestream_receiving = 0;
+    uint8_t bytestream_received = 0;
+    uint8_t device_id = 0x00;
+} modbus_t;
+modbus_t modbus = {};
+            </code></pre>
+            <p>NOTE: Change the <code style="font-weight: bold; color: #c026d3;">device_id</code> variable with an
+                unique number that identifies the Slave device. Leave 0x00 to Master
+                device.</p>
+
+            <p style="font-weight: bold;">FUN: Write ByteStream (Send Query/Response)</p>
+            <p>Write bytestream of chosen buffer to modbus.</p>
+            <pre><code>
+void modbus_write(uint8_t *buf, int len) 
+{
+  for(int pos = 0; pos < len; pos++)
+  {
+    serial_modbus.write(buf[pos]);
+  }
+}
+            </code></pre>
+
+            <p style="font-weight: bold;">FUN: Read ByteStream (Receive Query/Response)</p>
+            <p>Read incoming bytestream, save complete stream in <code
+                    style="font-weight: bold; color: #c026d3;">modbus.receiver_buff</code> and notify complete
+                bytestream with <code style="font-weight: bold; color: #c026d3;">modbus.bytestream_received</code>.</p>
+            <pre><code>
+void modbus_read() 
+{
+    if (serial_modbus.available() > 0) 
+    {
+        uint8_t c = serial_modbus.read();
+        modbus.receiver_buff[modbus.receiver_buff_index] = c;
+        modbus.receiver_buff_index++;
+        modbus.bytestream_receiving = 1;
+        modbus.receiver_timer = millis();
+    }
+
+    if (modbus.bytestream_receiving) 
+    {
+        if (millis() - modbus.receiver_timer > 40) 
+        {
+            modbus.receiver_buff_index = 0;
+            modbus.bytestream_receiving = 0;
+            modbus.bytestream_received = 1;
+        }
+    }
+}
+            </code></pre>
+
+            <p style="font-weight: bold;">FUN: Calculate CRC16</p>
+            <p>Calculate the Modbus CRC16 value and update the query buffer.</p>
+            <pre><code>
+void modbus_crc16(uint8_t *buf, int len)
+{
+    uint16_t crc = modbus_crc16_calculate(buf, len);
+    modbus_crc16_update(buf, len, crc);
+}
+            </code></pre>
+            <pre><code>
+uint16_t modbus_crc16_calculate(uint8_t *buf, int len) 
+{
+    uint16_t crc = 0xFFFF;
+    for (int pos = 0; pos < len; pos++) 
+    {
+        crc ^= (uint16_t)buf[pos];
+        for (int i = 8; i != 0; i--) 
+        {
+            if ((crc & 0x0001) != 0) 
+            {
+                crc >>= 1;
+                crc ^= 0xA001;
+            } 
+            else 
+            {
+                crc >>= 1;
+            }
+        }
+    }
+    return crc;
+}
+            </code></pre>
+            <pre><code>
+void modbus_crc16_update(uint8_t *buf, int len, uint16_t crc)
+{
+    uint8_t highByte = (crc >> 8) & 0xFF;
+    uint8_t lowByte = crc & 0xFF;
+    buf[len] = lowByte;
+    buf[len+1] = highByte;
+}
+            </code></pre>
+
+
+            <p style="font-weight: bold;">FUN: Print ByteStream (Debug)</p>
+            <p>Print the bytestream buffer in the main serial interface. This functions are used for debug purpose only,
+                to check if the bytestreams are sent/received correctly.</p>
+            <pre><code>
+void modbus_print_hex(uint8_t *buf, int len) 
+{
+    for(int i = 0; i < len; i++)
+    {
+        Serial.print("0x");
+        Serial.print(buf[i], HEX);
+        Serial.print(" ");
+    }
+    Serial.println();
+}
+            </code></pre>
+            <pre><code>
+void modbus_print_dec(uint8_t *buf, int len) 
+{
+    for(int i = 0; i < len; i++)
+    {
+        Serial.print(buf[i]);
+        Serial.print(" ");
+    }
+    Serial.println();
+}
+            </code></pre>
+        </article>
+    </main>
+</body>
+
+</html>
